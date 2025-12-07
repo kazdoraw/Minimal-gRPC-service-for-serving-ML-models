@@ -18,6 +18,7 @@ ENV/
 # Generated files (uncommenting to track in repo)
 generated/model_pb2.py
 generated/model_pb2_grpc.py
+*.bak
 
 # OS
 .DS_Store
