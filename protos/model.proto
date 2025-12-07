@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package mlservice.v1;
+
+// Сервис для ML предсказаний
+service PredictionService {
+    // Health check эндпоинт
+    rpc Health(HealthRequest) returns (HealthResponse);
+    
+    // Prediction эндпоинт
+    rpc Predict(PredictRequest) returns (PredictResponse);
+}
+
+// Запрос для health check
+message HealthRequest {
+    // Пустой запрос
+}
+
+// Ответ health check
+message HealthResponse {
+    string status = 1;           // Статус сервиса ("ok" или "error")
+    string model_version = 2;    // Версия модели
+}
+
+// Запрос для предсказания
+message PredictRequest {
+    repeated float features = 1;  // Массив признаков для модели
+}
+
+// Ответ с предсказанием
+message PredictResponse {
+    string prediction = 1;        // Результат предсказания (класс или значение)
+    float confidence = 2;         // Уверенность модели (0.0 - 1.0)
+    string model_version = 3;     // Версия использованной модели
+}
