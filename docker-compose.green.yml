@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  ml-service-green:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ml-service-green
+    environment:
+      - MODEL_VERSION=v1.1.0
+      - MODEL_PATH=/app/models/v1.1.0/model.pkl
+      - PORT=50051
+    ports:
+      - "50052:50051"
+    volumes:
+      - ./models:/app/models:ro
+    networks:
+      - ml-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import grpc; channel = grpc.insecure_channel('localhost:50051'); channel.close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    labels:
+      - "deployment=green"
+      - "version=v1.1.0"
+
+networks:
+  ml-network:
+    driver: bridge

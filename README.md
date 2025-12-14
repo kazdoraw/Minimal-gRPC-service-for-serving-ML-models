@@ -1,17 +1,24 @@
-# gRPC ML Service
+# gRPC ML Service with Blue-Green Deployment
 
-Минимальный gRPC-сервис для обслуживания ML-моделей с эндпоинтами Health и Predict.
+Минимальный gRPC-сервис для обслуживания ML-моделей с эндпоинтами Health и Predict. Реализована стратегия Blue-Green deployment для безопасного развертывания новых версий моделей.
 
 ## Описание
 
-Проект реализует gRPC сервис на Python для обслуживания ML-модели (LogisticRegression на датасете Iris). Сервис предоставляет два эндпоинта:
-- `/health` - проверка состояния сервиса и версии модели
-- `/predict` - получение предсказаний от ML-модели
+Проект реализует gRPC сервис на Python для обслуживания ML-модели (LogisticRegression на датасете Iris) с полной автоматизацией CI/CD и стратегией Blue-Green deployment.
+
+### Основные возможности:
+- ✅ gRPC API с эндпоинтами `/health` и `/predict`
+- ✅ Blue-Green deployment для zero-downtime обновлений
+- ✅ Автоматический CI/CD через GitHub Actions
+- ✅ Nginx load balancer для маршрутизации трафика
+- ✅ Instant rollback при ошибках
+- ✅ Health checks и мониторинг
+- ✅ Версионирование моделей (v1.0.0, v1.1.0)
 
 ## Структура проекта
 
 ```
-ml_grpc_service/
+/Users/Shared/ml/DEPLOY/HW2/
 ├── protos/
 │   └── model.proto              # Protocol Buffers контракт API
 ├── generated/
@@ -22,11 +29,28 @@ ml_grpc_service/
 ├── client/
 │   └── client.py               # Тестовый клиент
 ├── models/
-│   └── model.pkl               # Обученная ML модель
-├── memory-bank/                # Документация разработки
+│   ├── v1.0.0/
+│   │   └── model.pkl           # Модель версии 1.0.0
+│   └── v1.1.0/
+│       └── model.pkl           # Модель версии 1.1.0
+├── nginx/
+│   ├── nginx.conf              # Конфигурация для Blue
+│   └── nginx-green.conf        # Конфигурация для Green
+├── scripts/
+│   ├── switch.sh               # Скрипт переключения Blue↔Green
+│   └── rollback.sh             # Скрипт отката
+├── .github/
+│   └── workflows/
+│       └── deploy.yml          # CI/CD pipeline
+├── docs/
+│   ├── DEPLOYMENT.md           # Документация по деплою
+│   ├── TEST_RESULTS.md         # Результаты тестирования
+│   └── screenshots/            # Скриншоты для отчета
+├── docker-compose.blue.yml     # Blue environment
+├── docker-compose.green.yml    # Green environment
+├── docker-compose.nginx.yml    # Полная инфраструктура
 ├── requirements.txt            # Python зависимости
 ├── Dockerfile                  # Docker конфигурация
-├── .dockerignore              # Исключения для Docker
 └── README.md                   # Этот файл
 ```
 
@@ -110,16 +134,48 @@ Overall: ALL TESTS PASSED
 
 ## Docker
 
-### Сборка образа
+### Простой запуск (для разработки)
 
 ```bash
 docker build -t grpc-ml-service .
+docker run -p 50051:50051 grpc-ml-service
 ```
 
-### Запуск контейнера
+### Blue-Green Deployment (production)
+
+#### Запуск всей инфраструктуры
 
 ```bash
-docker run -p 50051:50051 grpc-ml-service
+docker-compose -f docker-compose.nginx.yml up -d
+```
+
+Это запустит:
+- **Blue environment** (v1.0.0)
+- **Green environment** (v1.1.0)
+- **Nginx load balancer** (порт 50050)
+
+#### Проверка статуса
+
+```bash
+docker ps
+```
+
+#### Тестирование через Nginx
+
+```bash
+python test_blue_green.py
+```
+
+#### Переключение Blue → Green
+
+```bash
+./scripts/switch.sh
+```
+
+#### Откат на предыдущую версию
+
+```bash
+./scripts/rollback.sh
 ```
 
 ### Переменные окружения
@@ -127,14 +183,19 @@ docker run -p 50051:50051 grpc-ml-service
 | Переменная | Значение по умолчанию | Описание |
 |------------|----------------------|----------|
 | `PORT` | 50051 | Порт gRPC сервера |
-| `MODEL_PATH` | /app/models/model.pkl | Путь к файлу модели |
+| `MODEL_PATH` | /app/models/v1.0.0/model.pkl | Путь к файлу модели |
 | `MODEL_VERSION` | v1.0.0 | Версия модели |
 
-Пример запуска с кастомными переменными:
-```bash
-docker run -p 50051:50051 \
-  -e MODEL_VERSION=v2.0.0 \
-  grpc-ml-service
+### Архитектура Blue-Green
+
+```
+Client → Nginx (50050) → Blue (v1.0.0) или Green (v1.1.0)
+```
+
+**Преимущества:**
+- Zero-downtime deployment
+- Instant rollback
+- Тестирование новой версии в production
 ```
 
 ## API
@@ -218,39 +279,111 @@ print(f"Confidence: {response.confidence}")
 python train_model.py
 ```
 
+## CI/CD
+
+Проект использует GitHub Actions для автоматического развертывания.
+
+### Workflow
+
+При push в `main` автоматически:
+1. Собирается Docker образ
+2. Публикуется в GitHub Container Registry (GHCR)
+3. Выполняются health checks
+4. Тестируется prediction endpoint
+
+### Ручной запуск
+
+1. Перейти: **GitHub → Actions → Model Deployment**
+2. **Run workflow**
+3. Выбрать версию модели (v1.0.0 или v1.1.0)
+4. **Run workflow**
+
+### Секреты
+
+GitHub автоматически предоставляет `GITHUB_TOKEN` для GHCR.
+
 ## Разработка
 
 ### Требования
 
 - Python 3.11+
-- Docker (для контейнеризации)
-- grpcurl (опционально, для тестирования)
+- Docker & Docker Compose
+- Git
 
-### Команды
+### Команды разработки
 
 ```bash
 # Генерация proto кода
 ./generate_proto.sh
 
-# Обучение модели
+# Обучение модели v1.0.0
 python train_model.py
 
-# Запуск сервера
+# Обучение модели v1.1.0
+python train_model_v2.py
+
+# Запуск сервера (локально)
 python -m server.server
 
-# Запуск клиента
+# Тестирование клиентом
 python -m client.client
 
-# Docker сборка
-docker build -t grpc-ml-service .
-
-# Docker запуск
-docker run -p 50051:50051 grpc-ml-service
+# Тестирование Blue-Green
+python test_blue_green.py
 ```
+
+### Команды деплоя
+
+```bash
+# Запуск Blue-Green инфраструктуры
+docker-compose -f docker-compose.nginx.yml up -d
+
+# Переключение версий
+./scripts/switch.sh
+
+# Откат
+./scripts/rollback.sh
+
+# Остановка
+docker-compose -f docker-compose.nginx.yml down
+```
+
+## Документация
+
+- **[DEPLOYMENT.md](docs/DEPLOYMENT.md)** - полная документация по Blue-Green deployment
+- **[TEST_RESULTS.md](docs/TEST_RESULTS.md)** - результаты тестирования
+- **[LEARNING_GUIDE.md](LEARNING_GUIDE.md)** - обучающее руководство по MLOps
+- **[TASK3_PLAN.md](docs/TASK3_PLAN.md)** - план выполнения задания 3
+
+## Результаты тестирования
+
+✅ Все тесты пройдены успешно (13/13)
+
+| Категория | Статус |
+|-----------|--------|
+| Health Endpoints | ✅ PASS |
+| Predict Endpoints | ✅ PASS |
+| Blue-Green Switch | ✅ PASS |
+| Rollback | ✅ PASS |
+| Zero-downtime | ✅ PASS |
+| Docker Build | ✅ PASS |
+
+Подробнее: [TEST_RESULTS.md](docs/TEST_RESULTS.md)
+
+## Репозиторий
+
+GitHub: [https://github.com/kazdoraw/Minimal-gRPC-service-for-serving-ML-models](https://github.com/kazdoraw/Minimal-gRPC-service-for-serving-ML-models)
+
+## Задания
+
+- ✅ **Задание 2**: Minimal gRPC service for serving ML models
+- ✅ **Задание 3**: Blue-Green deployment strategy with CI/CD
 
 ## Автор
 
-Проект выполнен в рамках модуля «Архитектурные паттерны для обслуживания ML-моделей».
+Проект выполнен в рамках курса MLOps:
+- Модуль 2: «Архитектурные паттерны для обслуживания ML-моделей»
+- Модуль 3: «Автоматизированное развертывание с помощью CI/CD»
 
 ## Лицензия
 

@@ -1,0 +1,157 @@
+name: Model Deployment
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      model_version:
+        description: 'Model version to deploy'
+        required: true
+        default: 'v1.0.0'
+        type: choice
+        options:
+          - v1.0.0
+          - v1.1.0
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tags }}
+      model_version: ${{ steps.version.outputs.MODEL_VERSION }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Determine model version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "MODEL_VERSION=${{ inputs.model_version }}" >> $GITHUB_OUTPUT
+          else
+            echo "MODEL_VERSION=v1.0.0" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=${{ steps.version.outputs.MODEL_VERSION }}-
+            type=raw,value=${{ steps.version.outputs.MODEL_VERSION }}-latest
+            type=raw,value=latest
+      
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            MODEL_VERSION=${{ steps.version.outputs.MODEL_VERSION }}
+      
+      - name: Image digest
+        run: echo "Image built and pushed with tags ${{ steps.meta.outputs.tags }}"
+
+  health-check:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+      
+      - name: Generate gRPC code
+        run: |
+          chmod +x generate_proto.sh
+          ./generate_proto.sh
+      
+      - name: Test Docker image locally
+        run: |
+          docker run -d --name test-service \
+            -e MODEL_VERSION=${{ needs.build-and-push.outputs.model_version }} \
+            -e MODEL_PATH=/app/models/${{ needs.build-and-push.outputs.model_version }}/model.pkl \
+            -p 50051:50051 \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          
+          sleep 10
+          
+          python -c "
+          import grpc
+          from generated import model_pb2, model_pb2_grpc
+          
+          channel = grpc.insecure_channel('localhost:50051')
+          stub = model_pb2_grpc.PredictionServiceStub(channel)
+          
+          # Health check
+          health_response = stub.Health(model_pb2.HealthRequest())
+          print(f'Health: {health_response.status}')
+          print(f'Version: {health_response.model_version}')
+          
+          # Prediction test
+          predict_response = stub.Predict(model_pb2.PredictRequest(features=[5.1, 3.5, 1.4, 0.2]))
+          print(f'Prediction: {predict_response.prediction}')
+          print(f'Confidence: {predict_response.confidence:.4f}')
+          
+          assert health_response.status == 'ok', 'Health check failed'
+          assert health_response.model_version == '${{ needs.build-and-push.outputs.model_version }}', 'Version mismatch'
+          print('✅ All checks passed')
+          "
+          
+          docker stop test-service
+          docker rm test-service
+      
+      - name: Deployment summary
+        run: |
+          echo "### Deployment Summary 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Model Version**: ${{ needs.build-and-push.outputs.model_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image**: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ✅ Deployed and verified" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "#### Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "1. Pull the image: \`docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "2. Run Blue-Green switch: \`./scripts/switch.sh\`" >> $GITHUB_STEP_SUMMARY
+
+  notify:
+    needs: [build-and-push, health-check]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+      - name: Deployment status
+        run: |
+          if [ "${{ needs.health-check.result }}" = "success" ]; then
+            echo "✅ Deployment successful for version ${{ needs.build-and-push.outputs.model_version }}"
+          else
+            echo "❌ Deployment failed"
+            exit 1
+          fi
