@@ -34,3 +34,7 @@ htmlcov/
 
 # Memory Bank (internal development docs)
 memory-bank/
+
+# local docs
+DEPLOY/HW2/docs/
+DEPLOY/HW2/LEARNING_GUIDE.md
