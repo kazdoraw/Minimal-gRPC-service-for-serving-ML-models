@@ -36,5 +36,8 @@ htmlcov/
 memory-bank/
 
 # local docs
-DEPLOY/HW2/docs/
-DEPLOY/HW2/LEARNING_GUIDE.md
+docs/
+LEARNING_GUIDE.md
+SCREENSHOTS_GUIDE.md
+MONITORING.md
+test_monitoring.sh

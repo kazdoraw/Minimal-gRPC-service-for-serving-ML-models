@@ -1,0 +1,45 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'ml-service-cluster'
+    environment: 'development'
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+rule_files:
+  - 'alert_rules.yml'
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'ml_service'
+    scrape_interval: 10s
+    scrape_timeout: 5s
+    static_configs:
+      - targets: ['ml-service-blue:8000', 'ml-service-green:8000']
+        labels:
+          service: 'ml-prediction'
+          app: 'grpc-ml-service'
+    
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'request_latency_seconds.*'
+        action: keep
+      - source_labels: [__name__]
+        regex: 'request_total.*'
+        action: keep
+      - source_labels: [__name__]
+        regex: 'request_errors_total.*'
+        action: keep
+      - source_labels: [__name__]
+        regex: 'model_prediction_duration_seconds.*'
+        action: keep
+      - source_labels: [__name__]
+        regex: 'model_info.*'
+        action: keep

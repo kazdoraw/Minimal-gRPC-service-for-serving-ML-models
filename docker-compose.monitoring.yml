@@ -1,0 +1,125 @@
+version: '3.8'
+
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--storage.tsdb.retention.time=30d'
+    ports:
+      - "9090:9090"
+    networks:
+      - monitoring
+      - ml-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-simple-json-datasource
+    ports:
+      - "3000:3000"
+    networks:
+      - monitoring
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  ml-service-blue:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ml-service-blue
+    environment:
+      - MODEL_VERSION=v1.0.0
+      - MODEL_PATH=/app/models/v1.0.0/model.pkl
+      - PORT=50051
+      - METRICS_PORT=8000
+    ports:
+      - "50051:50051"
+      - "8001:8000"
+    volumes:
+      - ./models:/app/models:ro
+    networks:
+      - ml-network
+      - monitoring
+    healthcheck:
+      test: ["CMD", "python", "-c", "import grpc; channel = grpc.insecure_channel('localhost:50051'); channel.close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    labels:
+      - "service=ml-prediction"
+      - "version=v1.0.0"
+      - "environment=blue"
+
+  ml-service-green:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ml-service-green
+    environment:
+      - MODEL_VERSION=v1.1.0
+      - MODEL_PATH=/app/models/v1.1.0/model.pkl
+      - PORT=50051
+      - METRICS_PORT=8000
+    ports:
+      - "50052:50051"
+      - "8002:8000"
+    volumes:
+      - ./models:/app/models:ro
+    networks:
+      - ml-network
+      - monitoring
+    healthcheck:
+      test: ["CMD", "python", "-c", "import grpc; channel = grpc.insecure_channel('localhost:50051'); channel.close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    labels:
+      - "service=ml-prediction"
+      - "version=v1.1.0"
+      - "environment=green"
+
+networks:
+  monitoring:
+    driver: bridge
+  ml-network:
+    driver: bridge
+
+volumes:
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local

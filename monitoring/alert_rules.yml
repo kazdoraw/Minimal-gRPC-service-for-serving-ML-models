@@ -1,0 +1,109 @@
+groups:
+  - name: ml_service_slo_alerts
+    interval: 30s
+    rules:
+      - alert: HighRequestLatency
+        expr: histogram_quantile(0.95, sum(rate(request_latency_seconds_bucket{method="Predict"}[5m])) by (le, instance)) > 0.5
+        for: 2m
+        labels:
+          severity: warning
+          component: ml-service
+          slo: latency
+        annotations:
+          summary: "High request latency detected (p95 > 500ms)"
+          description: "p95 latency for {{ $labels.instance }} exceeded 500ms for 2 minutes. Current value: {{ $value | humanizeDuration }}"
+          runbook: "Check ML service performance, model complexity, and resource utilization"
+
+      - alert: CriticalRequestLatency
+        expr: histogram_quantile(0.95, sum(rate(request_latency_seconds_bucket{method="Predict"}[5m])) by (le, instance)) > 1.0
+        for: 1m
+        labels:
+          severity: critical
+          component: ml-service
+          slo: latency
+        annotations:
+          summary: "Critical request latency detected (p95 > 1s)"
+          description: "p95 latency for {{ $labels.instance }} exceeded 1 second. Current value: {{ $value | humanizeDuration }}"
+          runbook: "Immediate action required. Check service logs and system resources"
+
+      - alert: HighErrorRate
+        expr: (sum(rate(request_errors_total[5m])) by (instance) / sum(rate(request_total[5m])) by (instance)) * 100 > 1
+        for: 5m
+        labels:
+          severity: warning
+          component: ml-service
+          slo: error_rate
+        annotations:
+          summary: "High error rate detected (> 1%)"
+          description: "Error rate for {{ $labels.instance }} is {{ $value | humanizePercentage }}. SLO threshold: 1%"
+          runbook: "Check application logs for error patterns and model health"
+
+      - alert: CriticalErrorRate
+        expr: (sum(rate(request_errors_total[5m])) by (instance) / sum(rate(request_total[5m])) by (instance)) * 100 > 5
+        for: 2m
+        labels:
+          severity: critical
+          component: ml-service
+          slo: error_rate
+        annotations:
+          summary: "Critical error rate detected (> 5%)"
+          description: "Error rate for {{ $labels.instance }} is {{ $value | humanizePercentage }}. Immediate attention required"
+          runbook: "Investigate error logs immediately. Consider service rollback"
+
+      - alert: ServiceDown
+        expr: up{job="ml_service"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: ml-service
+          slo: availability
+        annotations:
+          summary: "ML Service is down"
+          description: "{{ $labels.instance }} has been down for more than 1 minute"
+          runbook: "Check service status, Docker container health, and system resources"
+
+      - alert: LowAvailability
+        expr: avg_over_time(up{job="ml_service"}[5m]) < 0.999
+        for: 5m
+        labels:
+          severity: warning
+          component: ml-service
+          slo: availability
+        annotations:
+          summary: "Service availability below SLO (< 99.9%)"
+          description: "Service availability is {{ $value | humanizePercentage }}. SLO: 99.9%"
+          runbook: "Check for intermittent failures or network issues"
+
+      - alert: SlowModelInference
+        expr: histogram_quantile(0.95, sum(rate(model_prediction_duration_seconds_bucket[5m])) by (le, instance)) > 0.1
+        for: 3m
+        labels:
+          severity: warning
+          component: ml-model
+          slo: inference_time
+        annotations:
+          summary: "Slow model inference detected (p95 > 100ms)"
+          description: "Model inference time for {{ $labels.instance }} is {{ $value | humanizeDuration }}"
+          runbook: "Check model complexity, input data quality, and CPU/GPU utilization"
+
+      - alert: HighRequestRate
+        expr: sum(rate(request_total[1m])) by (instance) > 100
+        for: 5m
+        labels:
+          severity: info
+          component: ml-service
+        annotations:
+          summary: "High request rate detected"
+          description: "Request rate for {{ $labels.instance }} is {{ $value | humanize }} req/sec"
+          runbook: "Monitor system resources. Consider scaling if sustained"
+
+      - alert: NoTraffic
+        expr: sum(rate(request_total[5m])) by (instance) == 0
+        for: 10m
+        labels:
+          severity: warning
+          component: ml-service
+        annotations:
+          summary: "No traffic to ML service"
+          description: "{{ $labels.instance }} has received no requests for 10 minutes"
+          runbook: "Check client connectivity and routing configuration"
